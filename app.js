@@ -300,17 +300,20 @@ function removerFoto(q) {
 
 /* ------------------------------------------------- envio das fotos */
 
+// No máximo 2 fotos subindo ao mesmo tempo: muitas chamadas simultâneas deixam o Apps Script lento
+const filaUpload = criarFila(2);
+
 /** Envia a foto para Imagens/_temp. A resposta final só move/renomeia, por isso o "Enviar" fica rápido. */
 function uploadFoto(f, q) {
   if (f.fileId) return Promise.resolve();
   if (uploads.has(f)) return uploads.get(f);
 
   if (fotos[q] === f) setStatus(q, 'enviando');
-  const p = buscarJson(API_URL, {
+  const p = filaUpload(() => buscarJson(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita o preflight de CORS
     body: JSON.stringify({ action: 'foto', base64: f.base64 })
-  }, 120000)
+  }, 120000))
     .then(res => {
       if (!res.ok) throw new Error(res.erro || 'Erro ao enviar a foto.');
       f.fileId = res.fileId;
@@ -527,6 +530,8 @@ const progresso = {
 
 /* ------------------------------------------------------------- envio */
 
+let envioId = null;
+
 async function enviar(e) {
   e.preventDefault();
   const d = coletar();
@@ -559,14 +564,18 @@ async function enviar(e) {
     progresso.etapa(fimFotos, 97, 'Salvando resposta e organizando as fotos...');
     d.fotos = {};
     TOPICOS.forEach(t => { d.fotos[t.id] = { fileId: fotos[t.id].fileId }; });
+    // Código único do envio: se a resposta se perder e o envio for repetido, o servidor não grava duas vezes
+    if (!envioId) envioId = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    d.envioId = envioId;
 
     const res = await buscarJson(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(d)
-    }, 180000);
+    }, 180000, 3);
     if (!res.ok) throw new Error(res.erro || 'Erro desconhecido.');
 
+    envioId = null;
     await progresso.fim(true);
     try { localStorage.setItem(LS_AUDITOR, d.auditor); } catch (_) {}
     await apagarRascunho();
@@ -585,6 +594,7 @@ async function enviar(e) {
 
 function limpar(perguntar) {
   if (perguntar && !confirm('Limpar todas as respostas do formulário?')) return;
+  envioId = null;
   const auditor = $('[name=auditor]').value;
   $('#form').reset();
   $('[name=auditor]').value = auditor;
