@@ -212,6 +212,11 @@ function grafico(id, horizontal) {
 }
 
 function desenhar(id, labels, valores) {
+  // Mostra só as categorias com valor (áreas/turnos/tópicos zerados ficam de fora)
+  const manter = valores.map(v => v > 0);
+  labels = labels.filter((_, i) => manter[i]);
+  valores = valores.filter((_, i) => manter[i]);
+
   const g = graficos[id];
   g.data.labels = labels;
   g.data.datasets[0].data = valores;
@@ -254,7 +259,6 @@ function atualizar() {
   $('#kAreas').textContent = auditadas.size;
   $('#kAreasSub').textContent = `de ${areasFiltro.length} área${areasFiltro.length > 1 ? 's' : ''}`;
 
-  // Realização por área (inclui áreas sem auditoria, para mostrar quem falta)
   const porArea = contar(linhas.map(l => l.area), areasFiltro);
   desenhar('cArea', areasFiltro.map(a => quebrar(a, 14)), areasFiltro.map(a => porArea[a]));
 
@@ -272,8 +276,11 @@ function atualizar() {
   graficos.cDet.resize();
   desenhar('cDet', det.map(([t]) => quebrar(t, 38)), det.map(([, n]) => n));
 
-  // Tabela por área
-  $('#tabela').innerHTML = areasFiltro.map(a => {
+  // Tabela por área (só áreas com auditoria no filtro)
+  const comDados = areasFiltro.filter(a => porArea[a] > 0);
+  $('#tabela').innerHTML = !comDados.length
+    ? '<tr class="zero"><td colspan="5">Nenhuma auditoria no filtro selecionado.</td></tr>'
+    : comDados.map(a => {
     const la = linhas.filter(l => l.area === a);
     const apo = la.reduce((s, l) => s + l.resp.filter(r => r && r !== CONFORME).length, 0);
     const it = la.length * nTop;
