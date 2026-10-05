@@ -148,10 +148,6 @@ body {
 .btn-upload svg { width: 18px; height: 18px; }
 .file-input { display: none; }
 .upload-btns { display: flex; flex-wrap: wrap; gap: 8px; }
-/* No computador não há câmera de celular: fica só "Anexar arquivo" */
-@media (hover: hover) and (pointer: fine) {
-  .btn-camera { display: none; }
-}
 
 .preview {
   display: none;
@@ -185,6 +181,12 @@ body {
   font: 500 14px Roboto, Arial, sans-serif; cursor: pointer; padding: 8px 0;
 }
 .btn-link:hover { text-decoration: underline; }
+
+.aviso {
+  position: sticky; top: 8px; z-index: 5;
+  background: #e6f4ea; color: #137333; border: 1px solid #a8dab5;
+  border-radius: 8px; padding: 10px 16px; margin-bottom: 12px; font-weight: 500;
+}
 
 .muted { color: var(--muted); }
 .footer { color: var(--muted); font-size: 12px; margin-top: 20px; }
