@@ -74,7 +74,7 @@ const TOPICOS = [
 /* ===================================================================== */
 
 const $ = (sel, el = document) => el.querySelector(sel);
-const fotos = {};          // { q1: { base64, bytes, original } }
+const fotos = {};          // { q1: { base64, nome, info, thumb } }
 const LS_AUDITOR = 'dace_auditor';
 const LS_SETORES = 'dace_setores';
 
@@ -239,7 +239,20 @@ async function comprimir(file) {
     q = Math.max(FOTO.qualidadeMin, q - 0.1);
     blob = await canvasParaBlob(canvas, q);
   }
-  return { blob, w, h };
+
+  // Miniatura pequena para a pré-visualização (manter a foto inteira decodificada na tela gasta muita memória)
+  const t = 160 / Math.max(w, h);
+  const mini = document.createElement('canvas');
+  mini.width = Math.round(w * t);
+  mini.height = Math.round(h * t);
+  mini.getContext('2d').drawImage(canvas, 0, 0, mini.width, mini.height);
+  const thumb = mini.toDataURL('image/jpeg', 0.7);
+
+  // Libera a memória dos canvas e da imagem original (celulares com pouca RAM matam a aba ao abrir a câmera)
+  canvas.width = canvas.height = mini.width = mini.height = 0;
+  img.src = '';
+
+  return { blob, w, h, thumb };
 }
 
 function kb(bytes) {
@@ -252,28 +265,103 @@ async function onFoto(input) {
   input.value = '';
   if (!file) return;
 
-  const prev = $('#prev_' + q);
-  prev.classList.add('show');
-  $('b', prev).textContent = file.name;
-  $('span', prev).textContent = 'Otimizando...';
-  $('img', prev).removeAttribute('src');
+  mostrarPreview(q, { nome: file.name, info: 'Otimizando...', thumb: '' });
 
   try {
-    const { blob, w, h } = await comprimir(file);
-    fotos[q] = { base64: await blobParaBase64(blob) };
-    $('img', prev).src = URL.createObjectURL(blob);
-    $('span', prev).textContent = `${w}×${h} px · ${kb(file.size)} → ${kb(blob.size)}`;
+    const { blob, w, h, thumb } = await comprimir(file);
+    fotos[q] = {
+      base64: await blobParaBase64(blob),
+      nome: file.name,
+      info: `${w}×${h} px · ${kb(file.size)} → ${kb(blob.size)}`,
+      thumb
+    };
+    mostrarPreview(q, fotos[q]);
     marcarErro('foto_' + q, false);
+    salvarRascunho();
   } catch (err) {
     delete fotos[q];
-    prev.classList.remove('show');
+    $('#prev_' + q).classList.remove('show');
     alert(err.message || 'Não foi possível ler a imagem.');
   }
+}
+
+function mostrarPreview(q, f) {
+  const prev = $('#prev_' + q);
+  prev.classList.add('show');
+  $('b', prev).textContent = f.nome;
+  $('span', prev).textContent = f.info;
+  if (f.thumb) $('img', prev).src = f.thumb;
+  else $('img', prev).removeAttribute('src');
 }
 
 function removerFoto(q) {
   delete fotos[q];
   $('#prev_' + q).classList.remove('show');
+  salvarRascunho();
+}
+
+/* --------------------------------------------------------- rascunho */
+// Respostas e fotos ficam salvas no aparelho (IndexedDB) até o envio.
+// Se o Android fechar a aba ao abrir a câmera, o preenchimento é restaurado.
+
+let dbPromise = null;
+function db() {
+  if (!dbPromise) {
+    dbPromise = new Promise((res, rej) => {
+      const r = indexedDB.open('dace', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  return dbPromise;
+}
+
+async function dbOp(modo, fn) {
+  const banco = await db();
+  return new Promise((res, rej) => {
+    const tx = banco.transaction('kv', modo);
+    const req = fn(tx.objectStore('kv'));
+    tx.oncomplete = () => res(req && req.result);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+const CAMPOS_RADIO = ['area', 'setor', 'turno'].concat(TOPICOS.map(t => t.id));
+
+async function salvarRascunho() {
+  const campos = { auditor: $('[name=auditor]').value };
+  CAMPOS_RADIO.forEach(n => { campos[n] = valorRadio(n); });
+  try { await dbOp('readwrite', s => s.put({ campos, fotos, salvoEm: Date.now() }, 'rascunho')); }
+  catch (err) { console.warn('Rascunho não salvo', err); }
+}
+
+async function apagarRascunho() {
+  try { await dbOp('readwrite', s => s.delete('rascunho')); } catch (_) {}
+}
+
+async function restaurarRascunho() {
+  let r;
+  try { r = await dbOp('readonly', s => s.get('rascunho')); } catch (_) { return; }
+  if (!r) return;
+
+  if (r.campos.auditor) $('[name=auditor]').value = r.campos.auditor;
+  CAMPOS_RADIO.forEach(n => {
+    const el = [...document.querySelectorAll(`[name="${n}"]`)].find(i => i.value === r.campos[n]);
+    if (el) el.checked = true;
+  });
+  Object.keys(r.fotos || {}).forEach(q => {
+    fotos[q] = r.fotos[q];
+    mostrarPreview(q, fotos[q]);
+  });
+
+  const n = Object.keys(fotos).length;
+  if (n || CAMPOS_RADIO.some(c => r.campos[c])) {
+    const aviso = $('#aviso');
+    aviso.textContent = `Preenchimento anterior recuperado${n ? ` (${n} foto${n > 1 ? 's' : ''})` : ''}.`;
+    aviso.classList.remove('hidden');
+    setTimeout(() => aviso.classList.add('hidden'), 6000);
+  }
 }
 
 /* -------------------------------------------------------- validação */
@@ -345,6 +433,7 @@ async function enviar(e) {
     if (!res.ok) throw new Error(res.erro || 'Erro desconhecido.');
 
     try { localStorage.setItem(LS_AUDITOR, d.auditor); } catch (_) {}
+    await apagarRascunho();
     $('#form').classList.add('hidden');
     $('#sucessoId').textContent = 'Protocolo: ' + res.id;
     $('#sucesso').classList.remove('hidden');
@@ -365,21 +454,30 @@ function limpar(perguntar) {
   $('[name=auditor]').value = auditor;
   Object.keys(fotos).forEach(removerFoto);
   document.querySelectorAll('.card.invalid').forEach(c => c.classList.remove('invalid'));
+  salvarRascunho();
 }
 
 /* ------------------------------------------------------------- init */
 
 document.addEventListener('DOMContentLoaded', () => {
   render();
-  carregarSetores();
+  carregarSetores();      // a lista de áreas é desenhada na hora, antes do primeiro await
+  restaurarRascunho();
 
   const form = $('#form');
   form.addEventListener('submit', enviar);
   form.addEventListener('change', e => {
     if (e.target.matches('.file-input')) return onFoto(e.target);
     if (e.target.name) marcarErro(e.target.name, false);
+    salvarRascunho();
   });
-  form.addEventListener('input', e => { if (e.target.name === 'auditor') marcarErro('auditor', false); });
+  let timerAuditor;
+  form.addEventListener('input', e => {
+    if (e.target.name !== 'auditor') return;
+    marcarErro('auditor', false);
+    clearTimeout(timerAuditor);
+    timerAuditor = setTimeout(salvarRascunho, 500);
+  });
   form.addEventListener('click', e => {
     const btn = e.target.closest('.btn-remove');
     if (btn) removerFoto(btn.dataset.q);
