@@ -63,25 +63,32 @@ function preparar(api, areas) {
   return { topicos: api.topicos, linhas, areas: todas };
 }
 
+// Uma única chamada traz áreas, dados e (com senha) as auditorias —
+// várias chamadas simultâneas deixam o Apps Script lento e ele devolve 404.
+let carregando = false;
 async function carregar() {
+  if (carregando) return;
+  carregando = true;
   status('Atualizando...');
+  if (lerChave() && !detalhes) audStatus('Carregando auditorias...');
   try {
-    const [dados, setores] = await Promise.all([
-      buscarJson(API_URL + '?action=dados', {}, 60000),
-      buscarJson(API_URL + '?action=setores', {}, 60000)
-    ]);
-    if (!dados.ok) throw new Error(dados.erro);
-    if (!setores.ok) throw new Error(setores.erro);
-    try { localStorage.setItem(LS_DADOS, JSON.stringify({ dados, setores: setores.setores, em: Date.now() })); } catch (_) {}
-    base = preparar(dados, setores.setores);
+    const r = await postar({ action: 'painel' }, 60000, 3);
+    if (!r.ok) throw new Error(r.erro);
+    if (!Array.isArray(r.linhas)) throw new Error('resposta inesperada — o Apps Script está na versão nova?');
+    const dados = { topicos: r.topicos, linhas: r.linhas };
+    try { localStorage.setItem(LS_DADOS, JSON.stringify({ dados, setores: r.setores, em: Date.now() })); } catch (_) {}
+    base = preparar(dados, r.setores);
     $('#atualizado').textContent = 'Atualizado às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     status('');
     montarFiltros();
+    aplicarDetalhes(r);
     atualizar();
-    carregarDetalhes();
   } catch (err) {
     console.error(err);
-    status('Não foi possível atualizar os dados (' + (err.message || err) + ').', true);
+    status('Não foi possível atualizar os dados (' + (err.message || err) + '). Clique em Atualizar para tentar de novo.', true);
+    audStatus(detalhes ? '' : 'Auditorias indisponíveis no momento.');
+  } finally {
+    carregando = false;
   }
 }
 
@@ -313,12 +320,18 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function postar(corpo, timeout) {
+function postar(corpo, timeout, tentativas) {
   return buscarJson(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita o preflight de CORS
     body: JSON.stringify(Object.assign({ chave: lerChave() }, corpo))
-  }, timeout);
+  }, timeout, tentativas);
+}
+
+function audStatus(msg) {
+  const st = $('#audStatus');
+  st.textContent = msg;
+  st.classList.toggle('hidden', !msg);
 }
 
 function mostrarSenha(erro) {
@@ -329,32 +342,18 @@ function mostrarSenha(erro) {
   $('#senhaErro').textContent = erro || '';
 }
 
-async function carregarDetalhes() {
-  if (!lerChave()) return mostrarSenha();
-  const st = $('#audStatus');
-  if (!detalhes) { st.textContent = 'Carregando auditorias...'; st.classList.remove('hidden'); }
-  try {
-    let r;
-    try { r = await postar({ action: 'detalhes' }, 60000); }
-    catch (err) { await new Promise(res => setTimeout(res, 1500)); r = await postar({ action: 'detalhes' }, 60000); } // uma nova tentativa
-    if (!r.ok) throw new Error(r.erro);
-    if (!Array.isArray(r.linhas)) throw new Error('resposta inesperada do Apps Script — a implantação está na versão nova?');
-    fotosComLink = !!r.fotosComLink;
-    detalhes = r.linhas.map(l => Object.assign(l, camposData(l.data)));
-    st.classList.add('hidden');
-    $('#formSenha').classList.add('hidden');
-    $('#audLista').classList.remove('hidden');
-    renderAuditorias();
-  } catch (err) {
-    console.error(err);
-    if (/senha/i.test(err.message)) {
-      gravarChave('');
-      mostrarSenha(err.message);
-    } else {
-      st.textContent = 'Não foi possível carregar as auditorias (' + err.message + ').';
-      st.classList.remove('hidden');
-    }
+/** Aplica a parte protegida da resposta do "painel" (auditorias) ou volta a pedir a senha. */
+function aplicarDetalhes(r) {
+  fotosComLink = !!r.fotosComLink;
+  if (r.erroSenha) {
+    gravarChave('');
+    return mostrarSenha(r.erroSenha);
   }
+  if (!r.detalhes) return mostrarSenha();
+  detalhes = r.detalhes.map(l => Object.assign(l, camposData(l.data)));
+  audStatus('');
+  $('#formSenha').classList.add('hidden');
+  $('#audLista').classList.remove('hidden');
 }
 
 function nApontamentos(l) {
@@ -389,32 +388,13 @@ function urlDrive(id) {
 
 // Plano B: foto servida pelo Apps Script. No máximo 2 ao mesmo tempo —
 // várias respostas grandes simultâneas deixam o Apps Script lento e ele devolve 404.
-const fila = { ativos: 0, max: 2, espera: [] };
-function naFila(tarefa) {
-  return new Promise((res, rej) => {
-    const rodar = () => {
-      fila.ativos++;
-      tarefa().then(res, rej).finally(() => {
-        fila.ativos--;
-        if (fila.espera.length) fila.espera.shift()();
-      });
-    };
-    fila.ativos < fila.max ? rodar() : fila.espera.push(rodar);
-  });
-}
+const naFila = criarFila(2);
 
 async function buscarFotoScript(id) {
-  for (let tentativa = 1; ; tentativa++) {
-    try {
-      const r = await postar({ action: 'verFoto', id }, 90000);
-      if (!r.ok) throw new Error(r.erro);
-      if (!r.base64) throw new Error('resposta sem a foto');
-      return `data:${r.mime};base64,${r.base64}`;
-    } catch (err) {
-      if (tentativa >= 2 || /senha/i.test(err.message)) throw err;
-      await new Promise(res => setTimeout(res, 1500));
-    }
-  }
+  const r = await postar({ action: 'verFoto', id }, 90000, 2);
+  if (!r.ok) throw new Error(r.erro);
+  if (!r.base64) throw new Error('resposta sem a foto');
+  return `data:${r.mime};base64,${r.base64}`;
 }
 
 function carregarFoto(id) {
@@ -510,7 +490,7 @@ document.addEventListener('DOMContentLoaded', () => {
     gravarChave(s);
     $('#senha').value = '';
     $('#senhaErro').textContent = 'Verificando...';
-    carregarDetalhes();
+    carregar();
   });
   $('#btnSair').addEventListener('click', () => { gravarChave(''); fotoCache.clear(); mostrarSenha(); });
   $('#btnMais').addEventListener('click', () => { limiteLista += POR_PAGINA; renderAuditorias(); });
