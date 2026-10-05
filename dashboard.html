@@ -63,6 +63,7 @@
     }
     .painel .corpo { padding: 12px 16px 16px; position: relative; }
     .span2 { grid-column: span 2; }
+    .span-all { grid-column: 1 / -1; }
     .chart { position: relative; height: 260px; }
     .vazio { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 
@@ -163,8 +164,7 @@
       <div class="painel span2"><h2>Realização</h2><div class="corpo"><div class="chart"><canvas id="cArea"></canvas></div></div></div>
       <div class="painel"><h2>Setor</h2><div class="corpo"><div class="chart"><canvas id="cSetor"></canvas></div></div></div>
       <div class="painel"><h2>Turno</h2><div class="corpo"><div class="chart"><canvas id="cTurno"></canvas></div></div></div>
-      <div class="painel span2"><h2>Apontamentos por tópico</h2><div class="corpo"><div class="chart"><canvas id="cTopico"></canvas></div></div></div>
-      <div class="painel span2"><h2>Detalhamento apontamento</h2><div class="corpo"><div class="chart" id="boxDet"><canvas id="cDet"></canvas></div></div></div>
+      <div class="painel span-all"><h2>Detalhamento apontamento</h2><div class="corpo"><div class="chart" id="boxDet"><canvas id="cDet"></canvas></div></div></div>
     </section>
 
     <section class="painel">
@@ -219,6 +219,6 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script src="config.js?v=5"></script>
-  <script src="dashboard.js?v=3"></script>
+  <script src="dashboard.js?v=4"></script>
 </body>
 </html>
