@@ -7,6 +7,8 @@ const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'o
 const LS_DADOS = 'dace_dash';
 const NAVY = '#0b1f4b';
 const NAVY_HOVER = '#23407f';
+// Cor fixa por setor (segue o setor mesmo quando um deles some no filtro)
+const CORES_SETOR = { 'Operação': ['#d32f2f', '#e45757'], 'Administrativo': [NAVY, NAVY_HOVER] };
 
 const $ = s => document.querySelector(s);
 
@@ -211,8 +213,9 @@ function grafico(id, horizontal) {
   });
 }
 
-function desenhar(id, labels, valores) {
-  // Mostra só as categorias com valor (áreas/turnos/tópicos zerados ficam de fora)
+/** cores (opcional): [cor, corHover] por categoria, alinhado com labels */
+function desenhar(id, labels, valores, cores) {
+  // Mostra só as categorias com valor (áreas/turnos zerados ficam de fora)
   const manter = valores.map(v => v > 0);
   labels = labels.filter((_, i) => manter[i]);
   valores = valores.filter((_, i) => manter[i]);
@@ -220,6 +223,11 @@ function desenhar(id, labels, valores) {
   const g = graficos[id];
   g.data.labels = labels;
   g.data.datasets[0].data = valores;
+  if (cores) {
+    const c = cores.filter((_, i) => manter[i]);
+    g.data.datasets[0].backgroundColor = c.map(x => x[0]);
+    g.data.datasets[0].hoverBackgroundColor = c.map(x => x[1]);
+  }
   g.update();
   const box = g.canvas.parentNode;
   let vazio = box.querySelector('.vazio');
@@ -243,9 +251,8 @@ function atualizar() {
   const nTop = base.topicos.length || 6;
   const itens = linhas.length * nTop;
   const apontamentos = [];
-  const porTopico = new Array(nTop).fill(0);
-  linhas.forEach(l => l.resp.forEach((r, i) => {
-    if (r && r !== CONFORME) { apontamentos.push(r); porTopico[i]++; }
+  linhas.forEach(l => l.resp.forEach(r => {
+    if (r && r !== CONFORME) apontamentos.push(r);
   }));
 
   // KPIs
@@ -264,12 +271,10 @@ function atualizar() {
   desenhar('cArea', areasFiltro.map(a => quebrar(a, 14)), areasFiltro.map(a => porArea[a]));
 
   const porSetor = contar(linhas.map(l => l.setor), SETORES);
-  desenhar('cSetor', SETORES, SETORES.map(s => porSetor[s]));
+  desenhar('cSetor', SETORES, SETORES.map(s => porSetor[s]), SETORES.map(s => CORES_SETOR[s] || [NAVY, NAVY_HOVER]));
 
   const porTurno = contar(linhas.map(l => l.turno), TURNOS);
   desenhar('cTurno', TURNOS, TURNOS.map(t => porTurno[t]));
-
-  desenhar('cTopico', base.topicos.map(t => quebrar(t, 24)), porTopico);
 
   // Detalhamento: cada tipo de não conformidade, do mais frequente para o menos
   const det = Object.entries(contar(apontamentos, [])).sort((a, b) => b[1] - a[1]);
@@ -430,7 +435,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (window.Chart) {
     Chart.defaults.font.family = 'Roboto, Arial, sans-serif';
     ['cArea', 'cSetor', 'cTurno'].forEach(id => grafico(id, false));
-    ['cTopico', 'cDet'].forEach(id => grafico(id, true));
+    grafico('cDet', true);
   } else {
     status('Não foi possível carregar a biblioteca de gráficos (Chart.js). Verifique a internet.', true);
     return;
