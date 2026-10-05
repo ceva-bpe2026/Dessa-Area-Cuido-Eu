@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dessa Área Cuido Eu - 5S</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="container">
+
+    <div class="banner" id="banner">
+      <img src="img/banner.png" alt="Dessa Área Cuido Eu - 5S" onload="this.parentNode.classList.add('has-img')" onerror="this.remove()">
+      <span class="banner-text">DESSA ÁREA CUIDO EU - 5S</span>
+    </div>
+
+    <section class="card card-title">
+      <h1>DESSA ÁREA CUIDO EU - 5S</h1>
+      <div class="intro">
+        <p><b>Objetivo</b><br>
+        Ser uma ferramenta que torne visíveis os apontamentos realizados durante o GEMBA das áreas, e registrar as tratativas aplicadas a cada apontamento.</p>
+
+        <p><b>Sensos a serem analisados</b></p>
+        <p><b>Seiri (Seleção):</b> Separar o que é necessário do que não é, eliminando o que não agrega valor.</p>
+        <p><b>Seiton (Organização):</b> Organizar os itens necessários de forma que sejam facilmente acessíveis e identificáveis.</p>
+        <p><b>Seiso (Limpeza):</b> Manter o ambiente limpo, prevenindo sujeira e facilitando a identificação de problemas.</p>
+        <p><b>Seiketsu (Padronização):</b> Estabelecer normas e padrões para manter a organização e limpeza.</p>
+        <p><b>Shitsuke (Disciplina):</b> Desenvolver hábitos e disciplina para seguir continuamente os padrões estabelecidos, garantindo a melhoria contínua.</p>
+
+        <p><b>Como fazer:</b></p>
+        <p>Deverá ser realizada uma inspeção na área auditada, observando cada item questionado no formulário. O formulário deve ser preenchido diariamente, e devem ser anexadas fotos que comprovem as informações registradas. Caso não haja nenhum apontamento, a foto deve refletir essa situação.</p>
+      </div>
+      <div class="required-note">* Indica uma pergunta obrigatória</div>
+    </section>
+
+    <form id="form" novalidate>
+      <div id="perguntas"></div>
+
+      <div class="actions">
+        <button type="submit" class="btn-submit" id="btnEnviar">Enviar</button>
+        <button type="button" class="btn-link" id="btnLimpar">Limpar formulário</button>
+      </div>
+    </form>
+
+    <section class="card card-title hidden" id="sucesso">
+      <h1>DESSA ÁREA CUIDO EU - 5S</h1>
+      <p>Sua resposta foi registrada.</p>
+      <p class="muted" id="sucessoId"></p>
+      <button type="button" class="btn-link" id="btnNova">Enviar outra resposta</button>
+    </section>
+
+    <p class="footer">Nunca envie senhas por este formulário.</p>
+  </main>
+
+  <div class="overlay hidden" id="overlay">
+    <div class="overlay-box">
+      <div class="spinner"></div>
+      <p id="overlayMsg">Enviando...</p>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
