@@ -334,8 +334,12 @@ async function carregarDetalhes() {
   const st = $('#audStatus');
   if (!detalhes) { st.textContent = 'Carregando auditorias...'; st.classList.remove('hidden'); }
   try {
-    const r = await postar({ action: 'detalhes' }, 60000);
+    let r;
+    try { r = await postar({ action: 'detalhes' }, 60000); }
+    catch (err) { await new Promise(res => setTimeout(res, 1500)); r = await postar({ action: 'detalhes' }, 60000); } // uma nova tentativa
     if (!r.ok) throw new Error(r.erro);
+    if (!Array.isArray(r.linhas)) throw new Error('resposta inesperada do Apps Script — a implantação está na versão nova?');
+    fotosComLink = !!r.fotosComLink;
     detalhes = r.linhas.map(l => Object.assign(l, camposData(l.data)));
     st.classList.add('hidden');
     $('#formSenha').classList.add('hidden');
@@ -376,16 +380,66 @@ function renderAuditorias() {
   mais.textContent = `Mostrar mais (${lista.length - visiveis.length} restantes)`;
 }
 
+let fotosComLink = false;   // o Apps Script avisa se as fotos estão compartilhadas por link
+
+/** Endereço da foto direto no Drive (rápido; precisa do compartilhamento por link). */
+function urlDrive(id) {
+  return `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1600`;
+}
+
+// Plano B: foto servida pelo Apps Script. No máximo 2 ao mesmo tempo —
+// várias respostas grandes simultâneas deixam o Apps Script lento e ele devolve 404.
+const fila = { ativos: 0, max: 2, espera: [] };
+function naFila(tarefa) {
+  return new Promise((res, rej) => {
+    const rodar = () => {
+      fila.ativos++;
+      tarefa().then(res, rej).finally(() => {
+        fila.ativos--;
+        if (fila.espera.length) fila.espera.shift()();
+      });
+    };
+    fila.ativos < fila.max ? rodar() : fila.espera.push(rodar);
+  });
+}
+
+async function buscarFotoScript(id) {
+  for (let tentativa = 1; ; tentativa++) {
+    try {
+      const r = await postar({ action: 'verFoto', id }, 90000);
+      if (!r.ok) throw new Error(r.erro);
+      if (!r.base64) throw new Error('resposta sem a foto');
+      return `data:${r.mime};base64,${r.base64}`;
+    } catch (err) {
+      if (tentativa >= 2 || /senha/i.test(err.message)) throw err;
+      await new Promise(res => setTimeout(res, 1500));
+    }
+  }
+}
+
 function carregarFoto(id) {
   if (!fotoCache.has(id)) {
-    const p = postar({ action: 'verFoto', id }, 90000).then(r => {
-      if (!r.ok) throw new Error(r.erro);
-      return `data:${r.mime};base64,${r.base64}`;
-    });
+    const p = naFila(() => buscarFotoScript(id));
     p.catch(() => fotoCache.delete(id)); // permite tentar de novo
     fotoCache.set(id, p);
   }
   return fotoCache.get(id);
+}
+
+function mostrarFoto(box, src) {
+  box.innerHTML = '';
+  const img = new Image();
+  img.alt = 'Foto do item';
+  img.src = src;
+  box.appendChild(img);
+  return img;
+}
+
+function fotoPeloScript(box, fid) {
+  box.textContent = 'Carregando foto...';
+  carregarFoto(fid)
+    .then(src => mostrarFoto(box, src))
+    .catch(err => { box.textContent = 'Não foi possível carregar a foto'; console.error(err); });
 }
 
 function abrirModal(id) {
@@ -418,9 +472,9 @@ function abrirModal(id) {
   document.querySelectorAll('#mItens [data-foto]').forEach(box => {
     const fid = box.dataset.foto;
     if (!fid) return;
-    carregarFoto(fid)
-      .then(src => { box.innerHTML = ''; const img = new Image(); img.src = src; img.alt = 'Foto do item'; box.appendChild(img); })
-      .catch(err => { box.textContent = 'Não foi possível carregar a foto'; console.error(err); });
+    if (!fotosComLink || fotoCache.has(fid)) return fotoPeloScript(box, fid);
+    const img = mostrarFoto(box, urlDrive(fid));
+    img.onerror = () => fotoPeloScript(box, fid); // foto antiga sem link: usa o Apps Script
   });
 }
 
