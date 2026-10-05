@@ -137,32 +137,54 @@ function render() {
 
 /* ---------------------------------------------------------- setores */
 
+// Lista exibida na hora, antes da resposta do servidor (que leva 2-5 s).
+// A aba Setup continua sendo a fonte oficial: a lista é atualizada em segundo plano.
+const SETORES_PADRAO = [
+  'Autometal', 'BPE / Facilities', 'CDC', 'Cross Docking', 'Monitoramento GM', 'Portão 08', 'Portão 15',
+  'Programação', 'QHSE', 'RH', 'Reversa', 'Santos Brasil - SBC', 'Multimodal - Santos', 'GM Sorocaba'
+];
+
 function renderAreas(setores) {
+  const marcado = valorRadio('area');
   $('#areas').innerHTML = radios('area', setores);
+  const igual = [...document.querySelectorAll('[name=area]')].find(i => i.value === marcado);
+  if (igual) igual.checked = true;
 }
 
 async function carregarSetores() {
-  let cache = null;
-  try { cache = JSON.parse(localStorage.getItem(LS_SETORES)); } catch (_) {}
-  if (Array.isArray(cache) && cache.length) renderAreas(cache);
+  let atual = SETORES_PADRAO;
+  try {
+    const cache = JSON.parse(localStorage.getItem(LS_SETORES));
+    if (Array.isArray(cache) && cache.length) atual = cache;
+  } catch (_) {}
+  renderAreas(atual);
 
   try {
-    const r = await fetch(API_URL + '?action=setores');
-    const data = await r.json();
+    const data = await buscarJson(API_URL + '?action=setores', {}, 25000);
     if (!data.ok) throw new Error(data.erro);
-    const marcado = document.querySelector('[name=area]:checked');
-    renderAreas(data.setores);
-    if (marcado) {
-      const igual = [...document.querySelectorAll('[name=area]')].find(i => i.value === marcado.value);
-      if (igual) igual.checked = true;
-    }
+    if (JSON.stringify(data.setores) !== JSON.stringify(atual)) renderAreas(data.setores);
     try { localStorage.setItem(LS_SETORES, JSON.stringify(data.setores)); } catch (_) {}
   } catch (err) {
-    console.error(err);
-    if (!cache) {
-      $('#areas').innerHTML = `<p class="load-error">Não foi possível carregar as áreas.
-        <button type="button" class="btn-link" onclick="carregarSetores()">Tentar novamente</button></p>`;
-    }
+    console.error(err); // a lista local continua na tela
+  }
+}
+
+/** fetch com tempo limite e mensagens de erro legíveis */
+async function buscarJson(url, opcoes, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const inicio = performance.now();
+  try {
+    const r = await fetch(url, Object.assign({}, opcoes, { signal: ctrl.signal }));
+    const texto = await r.text();
+    console.log(`[API] ${r.status} em ${Math.round(performance.now() - inicio)} ms`, texto.slice(0, 200));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    try { return JSON.parse(texto); } catch (_) { throw new Error('resposta não é JSON — verifique a URL e o acesso "Qualquer pessoa" da implantação'); }
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`sem resposta em ${timeoutMs / 1000}s — rede/proxy bloqueando script.google.com?`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -310,12 +332,11 @@ async function enviar(e) {
   overlay(true, 'Enviando respostas e fotos...');
   try {
     // text/plain evita o "preflight" de CORS, que o Apps Script não suporta
-    const r = await fetch(API_URL, {
+    const res = await buscarJson(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(d)
-    });
-    const res = await r.json();
+    }, 180000);
     if (!res.ok) throw new Error(res.erro || 'Erro desconhecido.');
 
     try { localStorage.setItem(LS_AUDITOR, d.auditor); } catch (_) {}
