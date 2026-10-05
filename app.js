@@ -621,6 +621,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cam) abrirCamera(cam.dataset.camera);
   });
 
+  // Atalho escondido: dois cliques/toques no banner abrem o dashboard
+  let ultimoToque = 0;
+  $('#banner').addEventListener('click', () => {
+    const agora = Date.now();
+    if (agora - ultimoToque < 400) location.href = 'dashboard.html';
+    ultimoToque = agora;
+  });
+
   $('#camCapturar').addEventListener('click', capturar);
   $('#camCancelar').addEventListener('click', fecharCamera);
 
