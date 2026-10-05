@@ -78,7 +78,8 @@ const fotos = {};          // { q1: { base64, bytes, original } }
 const LS_AUDITOR = 'dace_auditor';
 const LS_SETORES = 'dace_setores';
 
-const UPLOAD_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-18l-5.5 5.5 1.41 1.41L11 5.83V16h2V5.83l3.09 3.08 1.41-1.41L12 2z"/></svg>';
+const CAMERA_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/><path d="M9 2 7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.17L15 2H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>';
+const UPLOAD_ICON ='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-18l-5.5 5.5 1.41 1.41L11 5.83V16h2V5.83l3.09 3.08 1.41-1.41L12 2z"/></svg>';
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -121,8 +122,12 @@ function render() {
 
     html += card('foto_' + t.id, 'Anexe fotos da área em conformidade ou da não conformidade, caso tenha sido observada alguma.',
       `<p class="upload-hint">Faça upload de 1 arquivo aceito: imagem. A foto é otimizada automaticamente antes do envio.</p>
+       <input class="file-input" type="file" accept="image/*" capture="environment" id="cam_${t.id}" data-q="${t.id}">
        <input class="file-input" type="file" accept="image/*" id="file_${t.id}" data-q="${t.id}">
-       <label class="btn-upload" for="file_${t.id}">${UPLOAD_ICON}<span>Adicionar arquivo</span></label>
+       <div class="upload-btns">
+         <label class="btn-upload btn-camera" for="cam_${t.id}">${CAMERA_ICON}<span>Tirar foto</span></label>
+         <label class="btn-upload" for="file_${t.id}">${UPLOAD_ICON}<span>Anexar arquivo</span></label>
+       </div>
        <div class="preview" id="prev_${t.id}">
          <img alt="">
          <div class="preview-info"><b></b><span></span></div>
