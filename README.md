@@ -53,8 +53,9 @@ Assim a URL continua a mesma. ("Nova implantação" gera uma URL nova.)
 
 ## 3. GitHub Pages
 
-1. Crie um repositório e envie `index.html`, `styles.css`, `app.js` e a pasta `img/`
-   (a pasta `apps-script/` pode ir junto só como documentação).
+1. Crie um repositório e envie `index.html`, `dashboard.html`, `config.js`, `app.js`, `dashboard.js`,
+   `styles.css` e a pasta `img/` (a pasta `apps-script/` pode ir junto só como documentação).
+   Ao alterar um `.js`/`.css`, aumente o `?v=` correspondente nos `.html` para os celulares baixarem a versão nova.
 2. **Settings → Pages → Source: Deploy from a branch → main / (root) → Save.**
 3. Em ~1 minuto o link fica disponível: `https://SEU-USUARIO.github.io/NOME-DO-REPO/`.
 
@@ -84,7 +85,17 @@ Imagens/
 
 **Áreas** – são lidas da aba `Setup`, coluna A a partir da linha 2. Para incluir/remover uma área, basta editar a planilha.
 
+## Dashboard
+
+`dashboard.html` lê a aba `Respostas` (via `?action=dados`, sem nome do auditor nem links das fotos) e mostra
+realização por área, setor, turno, apontamentos por tópico e detalhamento, com filtros de área, setor, turno,
+mês, semana e período.
+
 ## Fotos
+
+Cada foto é enviada para `Imagens/_temp` assim que é tirada/anexada. No "Enviar", o script só move e renomeia
+para a pasta definitiva. Fotos que ficarem em `_temp` (formulário abandonado ou foto trocada) vão para a
+lixeira depois de 3 dias.
 
 As fotos são otimizadas **no celular, antes do envio**: lado maior limitado a 1920 px, JPEG com qualidade 85%
 (reduzida automaticamente até caber em ~700 KB). Uma foto de 4–8 MB vira tipicamente 300–600 KB, com qualidade
