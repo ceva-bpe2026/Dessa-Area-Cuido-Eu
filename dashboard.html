@@ -77,6 +77,46 @@
     .status.erro { color: #c5221f; }
     .hidden { display: none !important; }
 
+    #secAud { margin-top: 16px; }
+    .senha p { margin: 0 0 10px; color: var(--muted); }
+    .senha-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .senha input { font: 14px Roboto, Arial, sans-serif; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; min-width: 200px; }
+    .senha-erro { color: #c5221f; margin-top: 8px !important; min-height: 1em; }
+    .btn-prim { background: var(--navy); color: #fff; border: 0; border-radius: 6px; padding: 8px 18px; font: 500 14px Roboto, Arial, sans-serif; cursor: pointer; }
+    .btn-prim:hover { background: var(--navy-hover); }
+
+    table.aud tbody tr { cursor: pointer; }
+    table.aud tbody tr:hover { background: #f6f7fa; }
+    table.aud td:last-child { color: var(--navy); font-weight: 500; white-space: nowrap; }
+    .pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; }
+    .pill.ok { background: #e6f4ea; color: #137333; }
+    .pill.nc { background: #fdecea; color: #b3261e; }
+
+    .modal {
+      position: fixed; inset: 0; z-index: 30; background: rgba(15, 20, 35, .55);
+      display: flex; align-items: flex-start; justify-content: center; padding: 24px 16px; overflow-y: auto;
+    }
+    .modal-box { background: #fff; border-radius: 12px; width: 100%; max-width: 980px; overflow: hidden; }
+    .modal-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; background: var(--navy); color: #fff; padding: 16px 20px; }
+    .modal-head h3 { margin: 0; font-size: 20px; }
+    .modal-head p { margin: 2px 0 0; opacity: .8; font-size: 13px; }
+    .modal-x { background: none; border: 0; color: #fff; font-size: 30px; line-height: 1; cursor: pointer; padding: 0 4px; }
+    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 20px; margin: 0; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+    .meta dt { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; font-weight: 500; }
+    .meta dd { margin: 2px 0 0; font-weight: 500; overflow-wrap: anywhere; }
+    .meta a { color: var(--primary); }
+    .itens { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; padding: 20px; }
+    .item { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+    .item-foto { aspect-ratio: 4 / 3; background: #eceef2; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
+    .item-foto img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; display: block; }
+    .item-txt { padding: 10px 12px 12px; }
+    .item-txt b { display: block; font-size: 13px; margin-bottom: 6px; }
+    .item-txt .pill { white-space: normal; }
+
+    .lightbox { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.92); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; cursor: zoom-out; }
+    .lightbox img { max-width: 100%; max-height: calc(100% - 30px); object-fit: contain; }
+    .lightbox span { color: #bbb; font-size: 12px; margin-top: 8px; }
+
     @media (max-width: 1000px) {
       .grid { grid-template-columns: 1fr 1fr; }
       .kpis { grid-template-columns: 1fr 1fr; }
@@ -136,10 +176,49 @@
         </table>
       </div>
     </section>
+
+    <section class="painel" id="secAud">
+      <h2>Auditorias</h2>
+      <div class="corpo">
+        <form class="senha hidden" id="formSenha">
+          <p>As auditorias com fotos e nome do auditor são protegidas. Informe a senha do dashboard:</p>
+          <div class="senha-row">
+            <input type="password" id="senha" autocomplete="current-password" placeholder="Senha">
+            <button type="submit" class="btn-prim">Entrar</button>
+          </div>
+          <p class="senha-erro" id="senhaErro"></p>
+        </form>
+        <p class="status hidden" id="audStatus"></p>
+        <div class="tabela hidden" id="audLista">
+          <table class="aud">
+            <thead><tr><th>Data</th><th>Área</th><th>Setor</th><th>Turno</th><th>Auditor</th><th>Apontamentos</th><th></th></tr></thead>
+            <tbody id="audBody"></tbody>
+          </table>
+          <button type="button" class="btn-limpar hidden" id="btnMais">Mostrar mais</button>
+          <button type="button" class="btn-limpar" id="btnSair">Sair (esquecer senha)</button>
+        </div>
+      </div>
+    </section>
   </div>
+
+  <div class="modal hidden" id="modal" role="dialog" aria-modal="true" aria-labelledby="mTitulo">
+    <div class="modal-box">
+      <div class="modal-head">
+        <div>
+          <h3 id="mTitulo"></h3>
+          <p id="mSub"></p>
+        </div>
+        <button type="button" class="modal-x" id="mFechar" aria-label="Fechar">&times;</button>
+      </div>
+      <dl class="meta" id="mMeta"></dl>
+      <div class="itens" id="mItens"></div>
+    </div>
+  </div>
+
+  <div class="lightbox hidden" id="lightbox"><img alt=""><span>Toque para fechar</span></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script src="config.js?v=5"></script>
-  <script src="dashboard.js?v=2"></script>
+  <script src="dashboard.js?v=3"></script>
 </body>
 </html>
