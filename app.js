@@ -286,10 +286,16 @@ function mostrarPreview(q, f) {
   setStatus(q, f.fileId ? 'ok' : '');
 }
 
-function setStatus(q, st) {
+function setStatus(q, st, segundos) {
   const el = $('#prev_' + q + ' .st');
   el.dataset.st = st;
-  el.textContent = { enviando: 'Enviando...', ok: '✓ Foto enviada', erro: '⚠ Falha no envio — será reenviada ao clicar em Enviar' }[st] || '';
+  el.textContent = {
+    enviando: 'Enviando...',
+    ok: '✓ Foto enviada',
+    erro: segundos
+      ? `⚠ Falha no envio — tentando de novo em ${segundos}s`
+      : '⚠ Falha no envio — será reenviada ao clicar em Enviar'
+  }[st] || '';
 }
 
 function removerFoto(q) {
@@ -308,6 +314,7 @@ function uploadFoto(f, q) {
   if (f.fileId) return Promise.resolve();
   if (uploads.has(f)) return uploads.get(f);
 
+  clearTimeout(reenvios.get(f) && reenvios.get(f).timer); // envio manual/agora cancela o agendado
   if (fotos[q] === f) setStatus(q, 'enviando');
   const p = filaUpload(() => buscarJson(API_URL, {
     method: 'POST',
@@ -322,12 +329,42 @@ function uploadFoto(f, q) {
     })
     .catch(err => {
       console.error(err);
-      if (fotos[q] === f) setStatus(q, 'erro');
+      if (fotos[q] === f) agendarReenvio(f, q);
       throw err;
     })
     .finally(() => uploads.delete(f));
   uploads.set(f, p);
   return p;
+}
+
+// Reenvio automático: 5s, 10s, 20s, 40s e depois a cada 60s, até 10 tentativas.
+// Depois disso a foto ainda é reenviada ao clicar em "Enviar".
+const reenvios = new WeakMap(); // foto -> { n, timer }
+const MAX_REENVIOS = 10;
+
+function agendarReenvio(f, q) {
+  const r = reenvios.get(f) || { n: 0, timer: null };
+  clearTimeout(r.timer);
+  r.n++;
+  reenvios.set(f, r);
+  if (r.n > MAX_REENVIOS) return setStatus(q, 'erro');
+
+  let falta = Math.min(60, 5 * 2 ** (r.n - 1));
+  setStatus(q, 'erro', falta);
+  const tic = () => {
+    if (fotos[q] !== f || f.fileId || uploads.has(f)) return; // trocada, removida ou já enviando
+    if (--falta > 0) { setStatus(q, 'erro', falta); r.timer = setTimeout(tic, 1000); }
+    else uploadFoto(f, q).catch(() => {});
+  };
+  r.timer = setTimeout(tic, 1000);
+}
+
+/** Internet voltou: tenta na hora as fotos que ainda não subiram. */
+function reenviarPendentes() {
+  Object.keys(fotos).forEach(q => {
+    const f = fotos[q];
+    if (f && !f.fileId && !uploads.has(f)) uploadFoto(f, q).catch(() => {});
+  });
 }
 
 /* ----------------------------------------------- câmera na página */
@@ -638,6 +675,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (agora - ultimoToque < 400) location.href = 'dashboard.html';
     ultimoToque = agora;
   });
+
+  window.addEventListener('online', reenviarPendentes);
 
   $('#camCapturar').addEventListener('click', capturar);
   $('#camCancelar').addEventListener('click', fecharCamera);
