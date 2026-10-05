@@ -1,7 +1,4 @@
-/* =====================================================================
- *  CONFIGURAÇÃO — cole aqui a URL do Web App do Apps Script (termina em /exec)
- * ===================================================================== */
-const API_URL = 'https://script.google.com/macros/s/AKfycbweFlf0_-9j93_twGOf966Rv9KTGFAHdHwqGjAVjs4Alc8BULktvvS5-kwClPCjW6wd/exec';
+/* API_URL e buscarJson() ficam em config.js */
 
 // Compressão das fotos: lado maior até 1920 px, JPEG. Começa em qualidade 0.85
 // e reduz até caber em ~700 KB (uma foto de celular de 4-8 MB vira ~300-600 KB).
@@ -74,12 +71,17 @@ const TOPICOS = [
 /* ===================================================================== */
 
 const $ = (sel, el = document) => el.querySelector(sel);
-const fotos = {};          // { q1: { base64, nome, info, thumb } }
+const fotos = {};             // { q1: { base64?, fileId?, nome, info, thumb } }
+const uploads = new WeakMap(); // foto -> Promise do envio em andamento
 const LS_AUDITOR = 'dace_auditor';
 const LS_SETORES = 'dace_setores';
 
+// "Tirar foto" só em celular/tablet (iPad se identifica como Macintosh com touch)
+const EH_MOVEL = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+  (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
 const CAMERA_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/><path d="M9 2 7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.17L15 2H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>';
-const UPLOAD_ICON ='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-18l-5.5 5.5 1.41 1.41L11 5.83V16h2V5.83l3.09 3.08 1.41-1.41L12 2z"/></svg>';
+const UPLOAD_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-18l-5.5 5.5 1.41 1.41L11 5.83V16h2V5.83l3.09 3.08 1.41-1.41L12 2z"/></svg>';
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -121,16 +123,16 @@ function render() {
       t.ajuda);
 
     html += card('foto_' + t.id, 'Anexe fotos da área em conformidade ou da não conformidade, caso tenha sido observada alguma.',
-      `<p class="upload-hint">Faça upload de 1 arquivo aceito: imagem. A foto é otimizada automaticamente antes do envio.</p>
+      `<p class="upload-hint">Faça upload de 1 arquivo aceito: imagem. A foto é otimizada e enviada automaticamente.</p>
        <input class="file-input" type="file" accept="image/*" capture="environment" id="cam_${t.id}" data-q="${t.id}">
        <input class="file-input" type="file" accept="image/*" id="file_${t.id}" data-q="${t.id}">
        <div class="upload-btns">
-         <label class="btn-upload btn-camera" for="cam_${t.id}">${CAMERA_ICON}<span>Tirar foto</span></label>
+         ${EH_MOVEL ? `<button type="button" class="btn-upload" data-camera="${t.id}">${CAMERA_ICON}<span>Tirar foto</span></button>` : ''}
          <label class="btn-upload" for="file_${t.id}">${UPLOAD_ICON}<span>Anexar arquivo</span></label>
        </div>
        <div class="preview" id="prev_${t.id}">
          <img alt="">
-         <div class="preview-info"><b></b><span></span></div>
+         <div class="preview-info"><b></b><span class="info"></span><span class="st"></span></div>
          <button type="button" class="btn-remove" data-q="${t.id}" title="Remover">&times;</button>
        </div>`);
   });
@@ -174,25 +176,6 @@ async function carregarSetores() {
   }
 }
 
-/** fetch com tempo limite e mensagens de erro legíveis */
-async function buscarJson(url, opcoes, timeoutMs) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  const inicio = performance.now();
-  try {
-    const r = await fetch(url, Object.assign({}, opcoes, { signal: ctrl.signal }));
-    const texto = await r.text();
-    console.log(`[API] ${r.status} em ${Math.round(performance.now() - inicio)} ms`, texto.slice(0, 200));
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    try { return JSON.parse(texto); } catch (_) { throw new Error('resposta não é JSON — verifique a URL e o acesso "Qualquer pessoa" da implantação'); }
-  } catch (err) {
-    if (err.name === 'AbortError') throw new Error(`sem resposta em ${timeoutMs / 1000}s — rede/proxy bloqueando script.google.com?`);
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /* ------------------------------------------------------------- fotos */
 
 function carregarImagem(file) {
@@ -218,11 +201,11 @@ function blobParaBase64(blob) {
   });
 }
 
-async function comprimir(file) {
-  const img = await carregarImagem(file);
-  const escala = Math.min(1, FOTO.maxLado / Math.max(img.naturalWidth, img.naturalHeight));
-  const w = Math.round(img.naturalWidth * escala);
-  const h = Math.round(img.naturalHeight * escala);
+/** Redimensiona/comprime uma imagem ou um quadro de vídeo (sw × sh) para JPEG. */
+async function comprimir(fonte, sw, sh) {
+  const escala = Math.min(1, FOTO.maxLado / Math.max(sw, sh));
+  const w = Math.round(sw * escala);
+  const h = Math.round(sh * escala);
 
   const canvas = document.createElement('canvas');
   canvas.width = w;
@@ -231,7 +214,7 @@ async function comprimir(file) {
   ctx.fillStyle = '#fff';            // fundo branco para PNG com transparência
   ctx.fillRect(0, 0, w, h);
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, 0, 0, w, h);
+  ctx.drawImage(fonte, 0, 0, w, h);
 
   let q = FOTO.qualidade;
   let blob = await canvasParaBlob(canvas, q);
@@ -248,36 +231,27 @@ async function comprimir(file) {
   mini.getContext('2d').drawImage(canvas, 0, 0, mini.width, mini.height);
   const thumb = mini.toDataURL('image/jpeg', 0.7);
 
-  // Libera a memória dos canvas e da imagem original (celulares com pouca RAM matam a aba ao abrir a câmera)
-  canvas.width = canvas.height = mini.width = mini.height = 0;
-  img.src = '';
-
+  canvas.width = canvas.height = mini.width = mini.height = 0; // libera memória
   return { blob, w, h, thumb };
 }
 
-function kb(bytes) {
-  return bytes > 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB';
-}
-
-async function onFoto(input) {
-  const q = input.dataset.q;
-  const file = input.files[0];
-  input.value = '';
-  if (!file) return;
-
-  mostrarPreview(q, { nome: file.name, info: 'Otimizando...', thumb: '' });
-
+/** Comprime, mostra a miniatura e já começa a enviar a foto para o Drive. */
+async function processarFoto(q, nome, bytesOriginais, gerar) {
+  mostrarPreview(q, { nome, info: 'Otimizando...', thumb: '' });
+  setStatus(q, '');
   try {
-    const { blob, w, h, thumb } = await comprimir(file);
-    fotos[q] = {
+    const { blob, w, h, thumb } = await gerar();
+    const f = {
       base64: await blobParaBase64(blob),
-      nome: file.name,
-      info: `${w}×${h} px · ${kb(file.size)} → ${kb(blob.size)}`,
+      nome,
+      info: `${w}×${h} px · ${bytesOriginais ? kb(bytesOriginais) + ' → ' : ''}${kb(blob.size)}`,
       thumb
     };
-    mostrarPreview(q, fotos[q]);
+    fotos[q] = f;
+    mostrarPreview(q, f);
     marcarErro('foto_' + q, false);
     salvarRascunho();
+    uploadFoto(f, q).catch(() => {}); // erro já aparece na miniatura; é reenviada no "Enviar"
   } catch (err) {
     delete fotos[q];
     $('#prev_' + q).classList.remove('show');
@@ -285,13 +259,37 @@ async function onFoto(input) {
   }
 }
 
+function onArquivo(input) {
+  const q = input.dataset.q;
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  processarFoto(q, file.name, file.size, async () => {
+    const img = await carregarImagem(file);
+    const r = await comprimir(img, img.naturalWidth, img.naturalHeight);
+    img.src = '';
+    return r;
+  });
+}
+
+function kb(bytes) {
+  return bytes > 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB';
+}
+
 function mostrarPreview(q, f) {
   const prev = $('#prev_' + q);
   prev.classList.add('show');
   $('b', prev).textContent = f.nome;
-  $('span', prev).textContent = f.info;
+  $('.info', prev).textContent = f.info;
   if (f.thumb) $('img', prev).src = f.thumb;
   else $('img', prev).removeAttribute('src');
+  setStatus(q, f.fileId ? 'ok' : '');
+}
+
+function setStatus(q, st) {
+  const el = $('#prev_' + q + ' .st');
+  el.dataset.st = st;
+  el.textContent = { enviando: 'Enviando...', ok: '✓ Foto enviada', erro: '⚠ Falha no envio — será reenviada ao clicar em Enviar' }[st] || '';
 }
 
 function removerFoto(q) {
@@ -300,9 +298,99 @@ function removerFoto(q) {
   salvarRascunho();
 }
 
+/* ------------------------------------------------- envio das fotos */
+
+/** Envia a foto para Imagens/_temp. A resposta final só move/renomeia, por isso o "Enviar" fica rápido. */
+function uploadFoto(f, q) {
+  if (f.fileId) return Promise.resolve();
+  if (uploads.has(f)) return uploads.get(f);
+
+  if (fotos[q] === f) setStatus(q, 'enviando');
+  const p = buscarJson(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita o preflight de CORS
+    body: JSON.stringify({ action: 'foto', base64: f.base64 })
+  }, 120000)
+    .then(res => {
+      if (!res.ok) throw new Error(res.erro || 'Erro ao enviar a foto.');
+      f.fileId = res.fileId;
+      delete f.base64; // não precisa mais guardar a foto no aparelho
+      if (fotos[q] === f) { setStatus(q, 'ok'); salvarRascunho(); }
+    })
+    .catch(err => {
+      console.error(err);
+      if (fotos[q] === f) setStatus(q, 'erro');
+      throw err;
+    })
+    .finally(() => uploads.delete(f));
+  uploads.set(f, p);
+  return p;
+}
+
+/* ----------------------------------------------- câmera na página */
+// Abrir o app de câmera do celular faz o Android fechar a aba do navegador quando falta memória.
+// Com getUserMedia a câmera roda dentro da própria página, sem trocar de app.
+
+let camStream = null;
+let camQ = null;
+
+async function abrirCamera(q) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    $('#cam_' + q).click(); // navegador antigo: usa o app de câmera
+    return;
+  }
+  camQ = q;
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } },
+      audio: false
+    });
+  } catch (err) {
+    console.warn(err);
+    alert('Não foi possível abrir a câmera aqui (permissão negada?). Vamos usar o app de câmera do celular.');
+    $('#cam_' + q).click();
+    return;
+  }
+  const v = $('#camVideo');
+  v.srcObject = camStream;
+  $('#camera').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  try { await v.play(); } catch (_) {}
+}
+
+function fecharCamera() {
+  if (camStream) camStream.getTracks().forEach(t => t.stop());
+  camStream = null;
+  $('#camVideo').srcObject = null;
+  $('#camera').classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+function capturar() {
+  const v = $('#camVideo');
+  if (!v.videoWidth) return; // câmera ainda iniciando
+  const q = camQ;
+  const vw = v.videoWidth;
+  const vh = v.videoHeight;
+
+  // Copia o quadro antes de fechar a câmera
+  const quadro = document.createElement('canvas');
+  quadro.width = vw;
+  quadro.height = vh;
+  quadro.getContext('2d').drawImage(v, 0, 0, vw, vh);
+  fecharCamera();
+
+  const nome = 'Foto ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  processarFoto(q, nome, 0, async () => {
+    const r = await comprimir(quadro, vw, vh);
+    quadro.width = quadro.height = 0;
+    return r;
+  });
+}
+
 /* --------------------------------------------------------- rascunho */
 // Respostas e fotos ficam salvas no aparelho (IndexedDB) até o envio.
-// Se o Android fechar a aba ao abrir a câmera, o preenchimento é restaurado.
+// Se o navegador fechar a aba, o preenchimento é restaurado.
 
 let dbPromise = null;
 function db() {
@@ -332,7 +420,9 @@ const CAMPOS_RADIO = ['area', 'setor', 'turno'].concat(TOPICOS.map(t => t.id));
 async function salvarRascunho() {
   const campos = { auditor: $('[name=auditor]').value };
   CAMPOS_RADIO.forEach(n => { campos[n] = valorRadio(n); });
-  try { await dbOp('readwrite', s => s.put({ campos, fotos, salvoEm: Date.now() }, 'rascunho')); }
+  const copia = {};
+  Object.keys(fotos).forEach(q => { copia[q] = Object.assign({}, fotos[q]); });
+  try { await dbOp('readwrite', s => s.put({ campos, fotos: copia, salvoEm: Date.now() }, 'rascunho')); }
   catch (err) { console.warn('Rascunho não salvo', err); }
 }
 
@@ -353,6 +443,7 @@ async function restaurarRascunho() {
   Object.keys(r.fotos || {}).forEach(q => {
     fotos[q] = r.fotos[q];
     mostrarPreview(q, fotos[q]);
+    if (!fotos[q].fileId) uploadFoto(fotos[q], q).catch(() => {});
   });
 
   const n = Object.keys(fotos).length;
@@ -383,13 +474,9 @@ function coletar() {
     area: valorRadio('area'),
     setor: valorRadio('setor'),
     turno: valorRadio('turno'),
-    respostas: {},
-    fotos: {}
+    respostas: {}
   };
-  TOPICOS.forEach(t => {
-    d.respostas[t.id] = valorRadio(t.id);
-    if (fotos[t.id]) d.fotos[t.id] = { base64: fotos[t.id].base64 };
-  });
+  TOPICOS.forEach(t => { d.respostas[t.id] = valorRadio(t.id); });
 
   const erros = [];
   const checar = (field, ok) => { marcarErro(field, !ok); if (!ok) erros.push(field); };
@@ -399,7 +486,7 @@ function coletar() {
   checar('turno', !!d.turno);
   TOPICOS.forEach(t => {
     checar(t.id, !!d.respostas[t.id]);
-    checar('foto_' + t.id, !!d.fotos[t.id]);
+    checar('foto_' + t.id, !!fotos[t.id]);
   });
 
   if (erros.length) {
@@ -409,12 +496,36 @@ function coletar() {
   return d;
 }
 
-/* ------------------------------------------------------------- envio */
+/* ------------------------------------------------------- progresso */
+// A barra avança suavemente em direção ao "teto" da etapa atual e salta quando cada etapa termina.
 
-function overlay(on, msg) {
-  $('#overlay').classList.toggle('hidden', !on);
-  if (msg) $('#overlayMsg').textContent = msg;
-}
+const progresso = {
+  val: 0, teto: 0, timer: null,
+  iniciar(msg) {
+    this.val = 0; this.teto = 0;
+    $('#overlay').classList.remove('hidden');
+    this.etapa(0, 5, msg);
+    clearInterval(this.timer);
+    this.timer = setInterval(() => { this.val += (this.teto - this.val) * 0.05; this.render(); }, 150);
+  },
+  etapa(min, teto, msg) {
+    this.val = Math.max(this.val, min);
+    this.teto = teto;
+    if (msg) $('#overlayMsg').textContent = msg;
+    this.render();
+  },
+  render() {
+    $('#progFill').style.width = this.val.toFixed(1) + '%';
+    $('#progPct').textContent = Math.floor(this.val) + '%';
+  },
+  fim(ok) {
+    clearInterval(this.timer);
+    if (ok) { this.val = 100; this.render(); }
+    return new Promise(res => setTimeout(() => { $('#overlay').classList.add('hidden'); res(); }, ok ? 400 : 0));
+  }
+};
+
+/* ------------------------------------------------------------- envio */
 
 async function enviar(e) {
   e.preventDefault();
@@ -422,9 +533,33 @@ async function enviar(e) {
   if (!d) return;
 
   $('#btnEnviar').disabled = true;
-  overlay(true, 'Enviando respostas e fotos...');
+  const pendentes = TOPICOS.map(t => t.id).filter(q => !fotos[q].fileId);
+  const fimFotos = pendentes.length ? 70 : 0; // fotos ocupam 0-70% da barra; o registro, o resto
+
   try {
-    // text/plain evita o "preflight" de CORS, que o Apps Script não suporta
+    if (pendentes.length) {
+      let prontas = 0;
+      const msg = () => `Enviando fotos (${prontas} de ${pendentes.length})...`;
+      progresso.iniciar(msg());
+      progresso.etapa(0, fimFotos / pendentes.length, msg());
+      await Promise.all(pendentes.map(q => {
+        const f = fotos[q];
+        return uploadFoto(f, q)
+          .catch(() => uploadFoto(f, q)) // uma nova tentativa antes de desistir
+          .then(() => {
+            prontas++;
+            const base = fimFotos * prontas / pendentes.length;
+            progresso.etapa(base, Math.min(fimFotos, base + fimFotos / pendentes.length), msg());
+          });
+      }));
+    } else {
+      progresso.iniciar('Salvando resposta...');
+    }
+
+    progresso.etapa(fimFotos, 97, 'Salvando resposta e organizando as fotos...');
+    d.fotos = {};
+    TOPICOS.forEach(t => { d.fotos[t.id] = { fileId: fotos[t.id].fileId }; });
+
     const res = await buscarJson(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -432,6 +567,7 @@ async function enviar(e) {
     }, 180000);
     if (!res.ok) throw new Error(res.erro || 'Erro desconhecido.');
 
+    await progresso.fim(true);
     try { localStorage.setItem(LS_AUDITOR, d.auditor); } catch (_) {}
     await apagarRascunho();
     $('#form').classList.add('hidden');
@@ -440,9 +576,9 @@ async function enviar(e) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   } catch (err) {
     console.error(err);
-    alert('Não foi possível enviar: ' + (err.message || err) + '\n\nVerifique a internet e tente novamente.');
+    await progresso.fim(false);
+    alert('Não foi possível enviar: ' + (err.message || err) + '\n\nSuas respostas e fotos continuam salvas. Verifique a internet e tente novamente.');
   } finally {
-    overlay(false);
     $('#btnEnviar').disabled = false;
   }
 }
@@ -467,7 +603,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const form = $('#form');
   form.addEventListener('submit', enviar);
   form.addEventListener('change', e => {
-    if (e.target.matches('.file-input')) return onFoto(e.target);
+    if (e.target.matches('.file-input')) return onArquivo(e.target);
     if (e.target.name) marcarErro(e.target.name, false);
     salvarRascunho();
   });
@@ -479,9 +615,14 @@ document.addEventListener('DOMContentLoaded', () => {
     timerAuditor = setTimeout(salvarRascunho, 500);
   });
   form.addEventListener('click', e => {
-    const btn = e.target.closest('.btn-remove');
-    if (btn) removerFoto(btn.dataset.q);
+    const rem = e.target.closest('.btn-remove');
+    if (rem) removerFoto(rem.dataset.q);
+    const cam = e.target.closest('[data-camera]');
+    if (cam) abrirCamera(cam.dataset.camera);
   });
+
+  $('#camCapturar').addEventListener('click', capturar);
+  $('#camCancelar').addEventListener('click', fecharCamera);
 
   $('#btnLimpar').addEventListener('click', () => limpar(true));
   $('#btnNova').addEventListener('click', () => {
