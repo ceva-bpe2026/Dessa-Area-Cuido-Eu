@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
   <!-- Ao alterar styles.css ou app.js, aumente o ?v= para os celulares baixarem a versão nova -->
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
   <main class="container">
@@ -61,11 +61,26 @@
 
   <div class="overlay hidden" id="overlay">
     <div class="overlay-box">
-      <div class="spinner"></div>
-      <p id="overlayMsg">Enviando...</p>
+      <p class="prog-title">Enviando formulário</p>
+      <div class="prog-bar" role="progressbar" aria-label="Progresso do envio"><div class="prog-fill" id="progFill"></div></div>
+      <div class="prog-row">
+        <span id="overlayMsg">Enviando...</span>
+        <b id="progPct">0%</b>
+      </div>
+      <p class="prog-hint">Não feche esta página.</p>
     </div>
   </div>
 
-  <script src="app.js?v=4"></script>
+  <div class="camera hidden" id="camera">
+    <video id="camVideo" playsinline muted autoplay></video>
+    <div class="camera-bar">
+      <button type="button" class="cam-cancel" id="camCancelar">Cancelar</button>
+      <button type="button" class="cam-shutter" id="camCapturar" aria-label="Tirar foto"></button>
+      <span class="cam-spacer"></span>
+    </div>
+  </div>
+
+  <script src="config.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
