@@ -37,6 +37,9 @@ body {
   display: flex;
   align-items: center;
   margin-bottom: 12px;
+  touch-action: manipulation; /* evita o zoom do toque duplo no celular */
+  user-select: none;
+  -webkit-user-select: none;
 }
 .banner img { display: block; width: 100%; height: auto; }
 .banner-text { color: #fff; font-weight: 700; font-size: 26px; padding: 0 24px; }
